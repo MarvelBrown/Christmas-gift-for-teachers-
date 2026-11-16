@@ -356,6 +356,30 @@ function getRibbonStyle(boxNumber: number): 'burgundy' | 'gold' | 'forest' | 'iv
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 
+const ALLOWED_ORIGIN_PATTERNS = [
+  /^https:\/\/workspace-pltawgpz\.v0\.build$/i,
+  /^https:\/\/[a-z0-9-]+\.vercel\.app$/i,
+  /^https:\/\/[a-z0-9-]+\.v0\.build$/i,
+  /^https:\/\/[a-z0-9-]+\.run\.app$/i,
+  /^http:\/\/localhost(:\d+)?$/i,
+  /^http:\/\/127\.0\.0\.1(:\d+)?$/i,
+];
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGIN_PATTERNS.some((re) => re.test(origin))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  }
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+  next();
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
@@ -1272,7 +1296,11 @@ async function startServer() {
   });
 }
 
-startServer().catch((err) => {
-  console.error('Fatal server startup error:', err);
-  process.exit(1);
-});
+if (!process.env.VERCEL) {
+  startServer().catch((err) => {
+    console.error('Fatal server startup error:', err);
+    process.exit(1);
+  });
+}
+
+export default app;

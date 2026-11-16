@@ -89,9 +89,15 @@ export default function App() {
     try {
       await signInWithGoogle();
     } catch (err) {
-      setAuthError(
-        err instanceof Error ? err.message : 'Google Sign-In was cancelled or failed.'
-      );
+      const msg = err instanceof Error ? err.message : 'Google Sign-In was cancelled or failed.';
+      if (msg.includes('auth/unauthorized-domain')) {
+        const host = window.location.hostname;
+        setAuthError(
+          `Google Sign-In is blocked because "${host}" is not yet in Firebase Authorized Domains. Add "${host}" in Firebase Console -> Authentication -> Settings -> Authorized domains.`
+        );
+      } else {
+        setAuthError(msg);
+      }
     }
   };
 
