@@ -1,0 +1,344 @@
+{
+  "entities": {
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Authorized organiser account permitted to manage the Christmas Gift Exchange.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 200
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "ExchangeMeta": {
+      "title": "ExchangeMeta",
+      "description": "Global configuration and participation status for The Christmas Gift Exchange.",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "tagline": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "isOpen": {
+          "type": "boolean"
+        },
+        "isInitialized": {
+          "type": "boolean"
+        },
+        "participantCount": {
+          "type": "integer"
+        },
+        "adminEmail": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "title",
+        "tagline",
+        "isOpen",
+        "isInitialized",
+        "participantCount",
+        "adminEmail",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "MysteryBox": {
+      "title": "MysteryBox",
+      "description": "Individual mystery Christmas gift box in the 20-box grid.",
+      "type": "object",
+      "properties": {
+        "boxId": {
+          "type": "string",
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "boxNumber": {
+          "type": "integer"
+        },
+        "ribbonStyle": {
+          "type": "string",
+          "enum": ["burgundy", "gold", "forest", "ivory"],
+          "maxLength": 20
+        },
+        "status": {
+          "type": "string",
+          "enum": ["unopened", "opened"],
+          "maxLength": 20
+        },
+        "openedByUid": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "openedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "boxId",
+        "boxNumber",
+        "ribbonStyle",
+        "status",
+        "openedByUid",
+        "openedAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CredentialVault": {
+      "title": "CredentialVault",
+      "description": "HMAC-keyed teacher credential record holding AES-256-GCM encrypted recipient assignment.",
+      "type": "object",
+      "properties": {
+        "authLookupId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "participantId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "encryptedPayload": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "claimedByUid": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "authLookupId",
+        "participantId",
+        "encryptedPayload",
+        "claimedByUid",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "RosterStatus": {
+      "title": "RosterStatus",
+      "description": "Admin-monitored participation status, vault binding, and encrypted PIN for each of the 20 teachers.",
+      "type": "object",
+      "properties": {
+        "participantId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "department": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "vaultId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "encryptedPin": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "hasParticipated": {
+          "type": "boolean"
+        },
+        "selectedBoxNumber": {
+          "type": "integer"
+        },
+        "claimedByUid": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "participatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "participantId",
+        "displayName",
+        "department",
+        "vaultId",
+        "encryptedPin",
+        "hasParticipated",
+        "selectedBoxNumber",
+        "claimedByUid",
+        "participatedAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "TeacherClaim": {
+      "title": "TeacherClaim",
+      "description": "Private revealed gift assignment and personalized Christmas greeting card record for a teacher.",
+      "type": "object",
+      "properties": {
+        "participantId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerEmail": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "vaultId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "recipientName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "recipientDepartment": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "boxNumber": {
+          "type": "integer"
+        },
+        "cardMessage": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "participantId",
+        "ownerUid",
+        "ownerEmail",
+        "vaultId",
+        "displayName",
+        "recipientName",
+        "recipientDepartment",
+        "boxNumber",
+        "cardMessage",
+        "createdAt"
+      ]
+    },
+    "UserLock": {
+      "title": "UserLock",
+      "description": "Enforces one-draw-per-authenticated-user to prevent duplicate draws or impersonation.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "participantId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "boxNumber": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "participantId", "boxNumber", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Registered administrator UIDs."
+    },
+    "/exchange_meta/{docId}": {
+      "schema": { "$ref": "#/entities/ExchangeMeta" },
+      "description": "Global exchange metadata and open/closed status."
+    },
+    "/boxes/{boxId}": {
+      "schema": { "$ref": "#/entities/MysteryBox" },
+      "description": "Twenty mystery gift boxes with atomic terminal-state opening."
+    },
+    "/credential_vault/{authLookupId}": {
+      "schema": { "$ref": "#/entities/CredentialVault" },
+      "description": "HMAC-keyed encrypted assignments mapped from Name+PIN."
+    },
+    "/roster_status/{participantId}": {
+      "schema": { "$ref": "#/entities/RosterStatus" },
+      "description": "Admin-only roster view tracking participation and encrypted PINs."
+    },
+    "/claims/{participantId}": {
+      "schema": { "$ref": "#/entities/TeacherClaim" },
+      "description": "Owner-restricted revealed recipient and greeting card data."
+    },
+    "/user_locks/{uid}": {
+      "schema": { "$ref": "#/entities/UserLock" },
+      "description": "UID lock preventing any user from drawing more than once."
+    }
+  }
+}

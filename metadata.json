@@ -1,0 +1,6 @@
+{
+  "name": "The Christmas Gift Exchange",
+  "description": "A Little Gift, A Lot of Love. Private Secret Santa mystery gift box exchange for 20 teachers with real-time Firestore persistence and downloadable Christmas greeting cards.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

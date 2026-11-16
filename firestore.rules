@@ -1,0 +1,270 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net: Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helper Primitives ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isAdminEmail() {
+      return isVerifiedUser()
+        && ('email' in request.auth.token)
+        && request.auth.token.email is string
+        && request.auth.token.email.lower() == 'orevabrown@gmail.com';
+    }
+
+    function isAdmin() {
+      return isAdminEmail() || (
+        isVerifiedUser() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // --- Validation Blueprints ---
+    function isValidAdminUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'email', 'createdAt'])
+        && isValidId(data.uid)
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 200
+        && data.createdAt is timestamp;
+    }
+
+    function isValidExchangeMeta(data) {
+      return data.keys().hasAll(['title', 'tagline', 'isOpen', 'isInitialized', 'participantCount', 'adminEmail', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['title', 'tagline', 'isOpen', 'isInitialized', 'participantCount', 'adminEmail', 'createdAt', 'updatedAt'])
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 100
+        && data.tagline is string && data.tagline.size() >= 1 && data.tagline.size() <= 140
+        && data.isOpen is bool
+        && data.isInitialized is bool
+        && data.participantCount is int && data.participantCount >= 2 && data.participantCount <= 100
+        && data.adminEmail is string && data.adminEmail.size() >= 3 && data.adminEmail.size() <= 200
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMysteryBox(data) {
+      return data.keys().hasAll(['boxId', 'boxNumber', 'ribbonStyle', 'status', 'openedByUid', 'openedAt', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['boxId', 'boxNumber', 'ribbonStyle', 'status', 'openedByUid', 'openedAt', 'createdAt', 'updatedAt'])
+        && data.boxId is string && data.boxId.size() >= 1 && data.boxId.size() <= 32 && data.boxId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.boxNumber is int && data.boxNumber >= 1 && data.boxNumber <= 20
+        && data.ribbonStyle is string && data.ribbonStyle.size() <= 20 && data.ribbonStyle in ['burgundy', 'gold', 'forest', 'ivory']
+        && data.status is string && data.status.size() <= 20 && data.status in ['unopened', 'opened']
+        && (data.openedByUid == null || isValidId(data.openedByUid))
+        && (data.openedAt == null || data.openedAt is timestamp)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCredentialVault(data) {
+      return data.keys().hasAll(['authLookupId', 'participantId', 'encryptedPayload', 'claimedByUid', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['authLookupId', 'participantId', 'encryptedPayload', 'claimedByUid', 'createdAt', 'updatedAt'])
+        && isValidId(data.authLookupId)
+        && data.participantId is string && data.participantId.size() >= 1 && data.participantId.size() <= 64 && data.participantId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.encryptedPayload is string && data.encryptedPayload.size() >= 10 && data.encryptedPayload.size() <= 2048
+        && (data.claimedByUid == null || isValidId(data.claimedByUid))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidRosterStatus(data) {
+      return data.keys().hasAll(['participantId', 'displayName', 'department', 'vaultId', 'encryptedPin', 'hasParticipated', 'selectedBoxNumber', 'claimedByUid', 'participatedAt', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['participantId', 'displayName', 'department', 'vaultId', 'encryptedPin', 'hasParticipated', 'selectedBoxNumber', 'claimedByUid', 'participatedAt', 'createdAt', 'updatedAt'])
+        && data.participantId is string && data.participantId.size() >= 1 && data.participantId.size() <= 64 && data.participantId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && data.department is string && data.department.size() >= 1 && data.department.size() <= 80
+        && isValidId(data.vaultId)
+        && data.encryptedPin is string && data.encryptedPin.size() >= 10 && data.encryptedPin.size() <= 512
+        && data.hasParticipated is bool
+        && (data.selectedBoxNumber == null || (data.selectedBoxNumber is int && data.selectedBoxNumber >= 1 && data.selectedBoxNumber <= 20))
+        && (data.claimedByUid == null || isValidId(data.claimedByUid))
+        && (data.participatedAt == null || data.participatedAt is timestamp)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTeacherClaim(data) {
+      return data.keys().hasAll(['participantId', 'ownerUid', 'ownerEmail', 'vaultId', 'displayName', 'recipientName', 'recipientDepartment', 'boxNumber', 'cardMessage', 'createdAt'])
+        && data.keys().hasOnly(['participantId', 'ownerUid', 'ownerEmail', 'vaultId', 'displayName', 'recipientName', 'recipientDepartment', 'boxNumber', 'cardMessage', 'createdAt'])
+        && data.participantId is string && data.participantId.size() >= 1 && data.participantId.size() <= 64 && data.participantId.matches('^[a-zA-Z0-9_\\-]+$')
+        && isValidId(data.ownerUid)
+        && data.ownerEmail is string && data.ownerEmail.size() >= 3 && data.ownerEmail.size() <= 200
+        && isValidId(data.vaultId)
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && data.recipientName is string && data.recipientName.size() >= 1 && data.recipientName.size() <= 120
+        && data.recipientDepartment is string && data.recipientDepartment.size() >= 1 && data.recipientDepartment.size() <= 80
+        && data.boxNumber is int && data.boxNumber >= 1 && data.boxNumber <= 20
+        && data.cardMessage is string && data.cardMessage.size() >= 1 && data.cardMessage.size() <= 500
+        && data.createdAt is timestamp;
+    }
+
+    function isValidUserLock(data) {
+      return data.keys().hasAll(['uid', 'participantId', 'boxNumber', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'participantId', 'boxNumber', 'createdAt'])
+        && isValidId(data.uid)
+        && data.participantId is string && data.participantId.size() >= 1 && data.participantId.size() <= 64 && data.participantId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.boxNumber is int && data.boxNumber >= 1 && data.boxNumber <= 20
+        && data.createdAt is timestamp;
+    }
+
+    // --- Collection Rules ---
+
+    match /admins/{uid} {
+      allow get: if isAdmin() || (isVerifiedUser() && isValidId(uid) && uid == request.auth.uid);
+      allow list: if isAdminEmail();
+      allow create: if isAdmin() && isValidId(uid) && isValidAdminUser(incoming()) && incoming().uid == uid && incoming().createdAt == request.time;
+      allow update: if isAdmin() && isValidId(uid) && isValidAdminUser(incoming()) && incoming().uid == existing().uid && incoming().createdAt == existing().createdAt;
+      allow delete: if isAdmin() && isValidId(uid);
+    }
+
+    match /exchange_meta/{docId} {
+      allow get: if isVerifiedUser() && isValidId(docId);
+      allow list: if isAdminEmail();
+      allow create: if isAdmin() && isValidId(docId) && isValidExchangeMeta(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(docId) && isValidExchangeMeta(incoming()) && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
+      allow delete: if isAdmin() && isValidId(docId);
+    }
+
+    match /boxes/{boxId} {
+      allow get: if isVerifiedUser() && isValidId(boxId);
+      allow list: if isAdminEmail();
+      allow create: if isAdmin() && isValidId(boxId) && isValidMysteryBox(incoming()) && incoming().boxId == boxId && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() && isValidId(boxId) && isValidMysteryBox(incoming()) && (
+        (
+          isAdmin()
+          && incoming().boxId == existing().boxId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+        ) || (
+          existing().status == 'unopened'
+          && incoming().status == 'opened'
+          && incoming().boxId == existing().boxId
+          && incoming().boxNumber == existing().boxNumber
+          && incoming().ribbonStyle == existing().ribbonStyle
+          && incoming().createdAt == existing().createdAt
+          && incoming().openedByUid == request.auth.uid
+          && incoming().openedAt == request.time
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'openedByUid', 'openedAt', 'updatedAt'])
+          && get(/databases/$(database)/documents/exchange_meta/config).data.isOpen == true
+          && get(/databases/$(database)/documents/exchange_meta/config).data.isInitialized == true
+          && getAfter(/databases/$(database)/documents/user_locks/$(request.auth.uid)).data.boxNumber == existing().boxNumber
+        )
+      );
+      allow delete: if isAdmin() && isValidId(boxId);
+    }
+
+    match /credential_vault/{authLookupId} {
+      allow get: if isAdmin() || (isVerifiedUser() && isValidId(authLookupId) && (resource == null || existing().claimedByUid == null || existing().claimedByUid == request.auth.uid));
+      allow list: if isAdminEmail();
+      allow create: if isAdmin() && isValidId(authLookupId) && isValidCredentialVault(incoming()) && incoming().authLookupId == authLookupId && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() && isValidId(authLookupId) && isValidCredentialVault(incoming()) && (
+        (
+          isAdmin()
+          && incoming().authLookupId == existing().authLookupId
+          && incoming().participantId == existing().participantId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+        ) || (
+          existing().claimedByUid == null
+          && incoming().claimedByUid == request.auth.uid
+          && incoming().authLookupId == existing().authLookupId
+          && incoming().participantId == existing().participantId
+          && incoming().encryptedPayload == existing().encryptedPayload
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['claimedByUid', 'updatedAt'])
+          && get(/databases/$(database)/documents/exchange_meta/config).data.isOpen == true
+          && existsAfter(/databases/$(database)/documents/user_locks/$(request.auth.uid))
+        )
+      );
+      allow delete: if isAdmin() && isValidId(authLookupId);
+    }
+
+    match /roster_status/{participantId} {
+      allow get: if isAdmin();
+      allow list: if isAdminEmail();
+      allow create: if isAdmin() && isValidId(participantId) && isValidRosterStatus(incoming()) && incoming().participantId == participantId && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() && isValidId(participantId) && isValidRosterStatus(incoming()) && (
+        (
+          isAdmin()
+          && incoming().participantId == existing().participantId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+        ) || (
+          existing().hasParticipated == false
+          && incoming().hasParticipated == true
+          && incoming().participantId == existing().participantId
+          && incoming().displayName == existing().displayName
+          && incoming().department == existing().department
+          && incoming().vaultId == existing().vaultId
+          && incoming().encryptedPin == existing().encryptedPin
+          && incoming().createdAt == existing().createdAt
+          && incoming().claimedByUid == request.auth.uid
+          && incoming().selectedBoxNumber is int
+          && incoming().participatedAt == request.time
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['hasParticipated', 'selectedBoxNumber', 'claimedByUid', 'participatedAt', 'updatedAt'])
+          && get(/databases/$(database)/documents/exchange_meta/config).data.isOpen == true
+          && incoming().selectedBoxNumber == getAfter(/databases/$(database)/documents/claims/$(participantId)).data.boxNumber
+        )
+      );
+      allow delete: if isAdmin() && isValidId(participantId);
+    }
+
+    match /claims/{participantId} {
+      allow get: if isAdmin() || (isVerifiedUser() && isValidId(participantId) && (resource == null || existing().ownerUid == request.auth.uid));
+      allow list: if isAdminEmail() || (isVerifiedUser() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isVerifiedUser()
+        && isValidId(participantId)
+        && isValidTeacherClaim(incoming())
+        && incoming().participantId == participantId
+        && incoming().ownerUid == request.auth.uid
+        && incoming().ownerEmail == request.auth.token.email
+        && incoming().createdAt == request.time
+        && get(/databases/$(database)/documents/exchange_meta/config).data.isOpen == true
+        && get(/databases/$(database)/documents/exchange_meta/config).data.isInitialized == true
+        && get(/databases/$(database)/documents/roster_status/$(participantId)).data.hasParticipated == false
+        && incoming().vaultId == get(/databases/$(database)/documents/roster_status/$(participantId)).data.vaultId
+        && getAfter(/databases/$(database)/documents/credential_vault/$(incoming().vaultId)).data.claimedByUid == request.auth.uid
+        && getAfter(/databases/$(database)/documents/user_locks/$(request.auth.uid)).data.boxNumber == incoming().boxNumber;
+      allow update: if isAdmin() && isValidId(participantId) && isValidTeacherClaim(incoming()) && incoming().participantId == existing().participantId && incoming().createdAt == existing().createdAt;
+      allow delete: if isAdmin() && isValidId(participantId);
+    }
+
+    match /user_locks/{uid} {
+      allow get: if isAdmin() || (isVerifiedUser() && isValidId(uid) && uid == request.auth.uid);
+      allow list: if isAdminEmail() || (isVerifiedUser() && resource.data.uid == request.auth.uid);
+      allow create: if isVerifiedUser()
+        && isValidId(uid)
+        && uid == request.auth.uid
+        && isValidUserLock(incoming())
+        && incoming().uid == request.auth.uid
+        && incoming().createdAt == request.time
+        && get(/databases/$(database)/documents/exchange_meta/config).data.isOpen == true
+        && existsAfter(/databases/$(database)/documents/claims/$(incoming().participantId));
+      allow update: if isAdmin() && isValidId(uid) && isValidUserLock(incoming()) && incoming().uid == existing().uid && incoming().createdAt == existing().createdAt;
+      allow delete: if isAdmin() && isValidId(uid);
+    }
+  }
+}
