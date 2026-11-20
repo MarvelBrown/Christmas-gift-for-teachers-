@@ -5,6 +5,7 @@ import {
   computeVaultId,
   decryptJson,
   encryptJson,
+  generateNameLookupCandidates,
   generateSecretSantaDerangement,
   verifyAssignmentsInvariant,
 } from '../lib/exchangeEngine.ts';
@@ -66,7 +67,26 @@ async function runTests() {
     const badLookup = computeVaultId(item.giver.displayName, 'WRONG1', TEST_SECRET);
     assert.equal(vaultStore.get(badLookup), undefined, 'Wrong PIN must never resolve.');
   }
-  console.log('   -> All 20/20 teacher credentials and encrypted payloads verified.');
+
+  // Test forgiving honorific, dot, reversed-order, and minor spelling variations
+  const variationCases: Array<[string, string]> = [
+    ['Miss Miracle Okudor', 'Miracle Okudor'],
+    ['Okudor Miracle', 'Miracle Okudor'],
+    ['Miss Keno Okeoghene', 'Miss. Keno Okeoghene'],
+    ['Keno Okeoghene', 'Miss. Keno Okeoghene'],
+    ['Miss. Faith Jude', 'Miss Faith Jude'],
+    ['Esther Francis', 'Mrs. Esther Francis'],
+    ['Oreva Brown', 'OrevaOghene Brown'],
+    ['Katherine Aura', 'Miss. Katherine Auura'],
+  ];
+  for (const [typedName, canonicalName] of variationCases) {
+    const match = liveAssignments.find((a) => a.giver.displayName === canonicalName);
+    assert.ok(match);
+    const candidates = generateNameLookupCandidates(typedName);
+    const resolved = candidates.some((c) => vaultStore.has(computeVaultId(c, match.pin, TEST_SECRET)));
+    assert.ok(resolved, `Typed name "${typedName}" must resolve to "${canonicalName}".`);
+  }
+  console.log('   -> All 20/20 teacher credentials, honorific variations, and encrypted payloads verified.');
 
   console.log('3. Testing simultaneous atomic box selections & race-condition rejection...');
   // Atomic state machine mirroring Firestore optimistic updateTime + exists:false preconditions

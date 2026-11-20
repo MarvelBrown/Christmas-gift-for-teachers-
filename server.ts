@@ -9,6 +9,7 @@ import {
   decryptJson,
   encryptJson,
   generateAccessPin,
+  generateNameLookupCandidates,
   generateSecretSantaDerangement,
   normalizeTeacherName,
   verifyAssignmentsInvariant,
@@ -268,6 +269,9 @@ async function firestoreBatchGet<T>(
   });
   if (!res.ok) {
     const body = await res.text();
+    if (res.status === 403) {
+      throw new HttpError(403, `Firestore batchGet permission denied: ${body}`);
+    }
     throw new Error(`Firestore batchGet failed (${res.status}): ${body}`);
   }
   const results = (await res.json()) as Array<{ found?: FirestoreRawDoc; missing?: string }>;
@@ -508,6 +512,49 @@ app.get('/api/exchange/state', async (req, res) => {
   }
 });
 
+async function findMatchingVault(
+  rawName: string,
+  rawPin: string,
+  idToken: string
+): Promise<{ vaultId: string; vaultDoc: VaultDoc & { _updateTime?: string; _id: string } } | null> {
+  const cleanPin = rawPin.replace(/\s+/g, '').toUpperCase();
+  const candidates = generateNameLookupCandidates(rawName);
+  if (candidates.length === 0 || !cleanPin) {
+    return null;
+  }
+
+  const vaultIds: string[] = [];
+  const seenIds = new Set<string>();
+  for (const candidateName of candidates) {
+    const vid = computeVaultId(candidateName, cleanPin, SECRET_KEY_HEX);
+    if (!seenIds.has(vid)) {
+      seenIds.add(vid);
+      vaultIds.push(vid);
+    }
+  }
+
+  let docs: Array<(VaultDoc & { _updateTime?: string; _id: string }) | null>;
+  try {
+    docs = await firestoreBatchGet<VaultDoc>(
+      vaultIds.map((vid) => `credential_vault/${vid}`),
+      idToken
+    );
+  } catch (err) {
+    if (err instanceof HttpError && err.status === 403) {
+      throw new HttpError(403, 'This teacher slot has already been claimed by another signed-in account.');
+    }
+    throw err;
+  }
+
+  for (let i = 0; i < docs.length; i++) {
+    const found = docs[i];
+    if (found) {
+      return { vaultId: vaultIds[i], vaultDoc: found };
+    }
+  }
+  return null;
+}
+
 // Verify teacher Name + Access PIN without revealing recipient before box selection
 app.post('/api/auth/verify-pin', async (req, res) => {
   try {
@@ -539,21 +586,12 @@ app.post('/api/auth/verify-pin', async (req, res) => {
       throw new HttpError(403, 'Participation is currently closed by the organiser.');
     }
 
-    const vaultId = computeVaultId(name, pin, SECRET_KEY_HEX);
-    let vaultDoc: (VaultDoc & { _updateTime?: string }) | null = null;
-    try {
-      vaultDoc = await firestoreGet<VaultDoc>(`credential_vault/${vaultId}`, user.idToken);
-    } catch (err) {
-      if (err instanceof HttpError && err.status === 403) {
-        throw new HttpError(403, 'This teacher slot has already been claimed by another signed-in account.');
-      }
-      throw err;
-    }
-
-    if (!vaultDoc) {
+    const match = await findMatchingVault(name, pin, user.idToken);
+    if (!match) {
       throw new HttpError(401, 'Registered name or access PIN did not match our faculty list. Please check your details.');
     }
 
+    const { vaultDoc } = match;
     if (vaultDoc.claimedByUid && vaultDoc.claimedByUid !== user.uid) {
       throw new HttpError(403, 'This teacher slot is already claimed by another account.');
     }
@@ -613,11 +651,12 @@ app.post('/api/exchange/open-box', async (req, res) => {
       throw new HttpError(403, 'Participation has been closed by the organiser.');
     }
 
-    const vaultId = computeVaultId(name, pin, SECRET_KEY_HEX);
-    const vaultDoc = await firestoreGet<VaultDoc>(`credential_vault/${vaultId}`, user.idToken);
-    if (!vaultDoc) {
+    const match = await findMatchingVault(name, pin, user.idToken);
+    if (!match) {
       throw new HttpError(401, 'Invalid teacher name or access PIN.');
     }
+
+    const { vaultId, vaultDoc } = match;
     if (vaultDoc.claimedByUid && vaultDoc.claimedByUid !== user.uid) {
       throw new HttpError(403, 'This teacher identity is locked to another user.');
     }

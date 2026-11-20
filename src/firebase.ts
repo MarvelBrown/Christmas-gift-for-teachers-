@@ -2,8 +2,11 @@ import { initializeApp } from 'firebase/app';
 import {
   GoogleAuthProvider,
   getAuth,
+  getRedirectResult,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
+  type UserCredential,
 } from 'firebase/auth';
 import {
   doc,
@@ -81,8 +84,24 @@ async function testConnection() {
 }
 void testConnection();
 
-export async function signInWithGoogle() {
-  return signInWithPopup(auth, googleProvider);
+let inFlightGoogleSignIn: Promise<UserCredential> | null = null;
+
+export async function signInWithGoogle(): Promise<UserCredential> {
+  if (inFlightGoogleSignIn) {
+    return inFlightGoogleSignIn;
+  }
+  inFlightGoogleSignIn = signInWithPopup(auth, googleProvider).finally(() => {
+    inFlightGoogleSignIn = null;
+  });
+  return inFlightGoogleSignIn;
+}
+
+export async function signInWithGoogleRedirect(): Promise<never> {
+  return signInWithRedirect(auth, googleProvider);
+}
+
+export async function consumeGoogleRedirectResult(): Promise<UserCredential | null> {
+  return getRedirectResult(auth);
 }
 
 export async function signOutUser() {

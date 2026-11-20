@@ -14,8 +14,15 @@ import { GiftBoxGrid } from './components/GiftBoxGrid';
 import { GreetingCard } from './components/GreetingCard';
 import { OrganiserDashboard } from './components/OrganiserDashboard';
 import { Snowfall } from './components/Snowfall';
-import { auth, signInWithGoogle, signOutUser } from './firebase';
+import {
+  auth,
+  consumeGoogleRedirectResult,
+  signInWithGoogle,
+  signInWithGoogleRedirect,
+  signOutUser,
+} from './firebase';
 import type { ExchangeStateResponse, TeacherClaim } from './types';
+import { triggerGiftRevealConfetti } from './utils/confetti';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -31,6 +38,8 @@ export default function App() {
     displayName: string;
   } | null>(null);
   const [verifyingPin, setVerifyingPin] = useState(false);
+  const [signingIn, setSigningIn] = useState(false);
+  const [showRedirectFallback, setShowRedirectFallback] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
   // Box opening animation & revealed card state
@@ -76,28 +85,125 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+    const readyTimer = window.setTimeout(() => {
+      if (active) setAuthReady(true);
+    }, 2500);
+
+    void auth
+      .authStateReady()
+      .catch(() => undefined)
+      .finally(() => {
+        if (active) setAuthReady(true);
+      });
+
+    void consumeGoogleRedirectResult().catch((err) => {
+      if (!active) return;
+      const msg = err instanceof Error ? err.message : 'Google Sign-In failed.';
+      setAuthError(msg);
+    });
+
     const unsubscribe = onAuthStateChanged(auth, (u) => {
+      if (!active) return;
       setUser(u);
       setAuthReady(true);
+      if (u) {
+        setAuthError(null);
+        setShowRedirectFallback(false);
+      }
       void loadExchangeState(u);
     });
-    return () => unsubscribe();
+
+    return () => {
+      active = false;
+      window.clearTimeout(readyTimer);
+      unsubscribe();
+    };
   }, [loadExchangeState]);
 
+  const formatAuthError = (err: unknown): { message: string; offerRedirect: boolean } => {
+    const code = (err as { code?: string } | null)?.code || '';
+    const rawMsg = err instanceof Error ? err.message : 'Google Sign-In was cancelled or failed.';
+
+    if (code === 'auth/unauthorized-domain' || rawMsg.includes('auth/unauthorized-domain')) {
+      const host = window.location.hostname;
+      return {
+        message: `Google Sign-In is blocked because "${host}" is not yet in Firebase Authorized Domains. Add "${host}" in Firebase Console -> Authentication -> Settings -> Authorized domains.`,
+        offerRedirect: false,
+      };
+    }
+
+    if (
+      code === 'auth/cancelled-popup-request' ||
+      rawMsg.includes('auth/cancelled-popup-request') ||
+      code === 'auth/popup-blocked' ||
+      rawMsg.includes('auth/popup-blocked') ||
+      code === 'auth/operation-not-supported-in-this-environment' ||
+      rawMsg.includes('auth/operation-not-supported-in-this-environment')
+    ) {
+      return {
+        message:
+          'Your browser blocked or cancelled the Google sign-in popup. Please try again once, or use Full-Page Sign-In below.',
+        offerRedirect: typeof window !== 'undefined' && window.self === window.top,
+      };
+    }
+
+    if (code === 'auth/popup-closed-by-user' || rawMsg.includes('auth/popup-closed-by-user')) {
+      return {
+        message: 'The Google sign-in window was closed before finishing. Tap Continue with Google to try again.',
+        offerRedirect: typeof window !== 'undefined' && window.self === window.top,
+      };
+    }
+
+    if (code === 'auth/network-request-failed' || rawMsg.includes('auth/network-request-failed')) {
+      return {
+        message: 'Network error while reaching Google Sign-In. Please check your connection and try again.',
+        offerRedirect: false,
+      };
+    }
+
+    return { message: rawMsg, offerRedirect: false };
+  };
+
   const handleGoogleSignIn = async () => {
+    if (signingIn) return;
     setAuthError(null);
+    setShowRedirectFallback(false);
+    setSigningIn(true);
     try {
       await signInWithGoogle();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Google Sign-In was cancelled or failed.';
-      if (msg.includes('auth/unauthorized-domain')) {
-        const host = window.location.hostname;
-        setAuthError(
-          `Google Sign-In is blocked because "${host}" is not yet in Firebase Authorized Domains. Add "${host}" in Firebase Console -> Authentication -> Settings -> Authorized domains.`
-        );
-      } else {
-        setAuthError(msg);
+      const code = (err as { code?: string } | null)?.code || '';
+      const isStandalone = typeof window !== 'undefined' && window.self === window.top;
+      if (isStandalone && (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment')) {
+        try {
+          await signInWithGoogleRedirect();
+          return;
+        } catch (redirErr) {
+          const parsed = formatAuthError(redirErr);
+          setAuthError(parsed.message);
+          setShowRedirectFallback(false);
+          return;
+        }
       }
+      const parsed = formatAuthError(err);
+      setAuthError(parsed.message);
+      setShowRedirectFallback(parsed.offerRedirect);
+    } finally {
+      setSigningIn(false);
+    }
+  };
+
+  const handleGoogleRedirectSignIn = async () => {
+    if (signingIn) return;
+    setAuthError(null);
+    setSigningIn(true);
+    try {
+      await signInWithGoogleRedirect();
+    } catch (err) {
+      const parsed = formatAuthError(err);
+      setAuthError(parsed.message);
+      setSigningIn(false);
     }
   };
 
@@ -136,7 +242,7 @@ export default function App() {
         },
         body: JSON.stringify({
           name: teacherName.trim(),
-          pin: accessPin.trim().toUpperCase(),
+          pin: accessPin.replace(/\s+/g, '').toUpperCase(),
         }),
       });
       const json = await res.json();
@@ -147,6 +253,8 @@ export default function App() {
         setActiveClaim(json.claim as TeacherClaim);
         document.getElementById('my-card')?.scrollIntoView({ behavior: 'smooth' });
       } else if (json.status === 'ready_to_draw') {
+        setTeacherName(json.displayName);
+        setAccessPin((prev) => prev.replace(/\s+/g, '').toUpperCase());
         setVerifiedTeacher({
           participantId: json.participantId,
           displayName: json.displayName,
@@ -177,7 +285,7 @@ export default function App() {
           },
           body: JSON.stringify({
             name: teacherName.trim(),
-            pin: accessPin.trim().toUpperCase(),
+            pin: accessPin.replace(/\s+/g, '').toUpperCase(),
             boxNumber,
           }),
         }),
@@ -191,6 +299,9 @@ export default function App() {
 
       if (json.claim) {
         setActiveClaim(json.claim as TeacherClaim);
+      }
+      if (json.status === 'opened') {
+        triggerGiftRevealConfetti();
       }
       await loadExchangeState(user);
       setTimeout(() => {
@@ -269,11 +380,12 @@ export default function App() {
             ) : (
               <button
                 type="button"
+                disabled={signingIn}
                 onClick={handleGoogleSignIn}
-                className="inline-flex min-h-[40px] cursor-pointer items-center gap-2 rounded-xl bg-[#7A1C2E] px-4 py-2 text-xs font-semibold text-[#FAF6EE] transition-colors hover:bg-[#631423] whitespace-nowrap shrink-0"
+                className="inline-flex min-h-[40px] cursor-pointer items-center gap-2 rounded-xl bg-[#7A1C2E] px-4 py-2 text-xs font-semibold text-[#FAF6EE] transition-colors hover:bg-[#631423] disabled:cursor-not-allowed disabled:opacity-60 whitespace-nowrap shrink-0"
               >
                 <LogIn className="h-3.5 w-3.5" />
-                <span>Sign In</span>
+                <span>{signingIn ? 'Signing In...' : 'Sign In'}</span>
               </button>
             )}
           </div>
@@ -355,11 +467,12 @@ export default function App() {
                     </div>
                     <button
                       type="button"
+                      disabled={signingIn}
                       onClick={handleGoogleSignIn}
-                      className="flex min-h-[48px] w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#7A1C2E] px-6 py-3 text-sm font-semibold text-[#FAF6EE] shadow-lg transition-colors hover:bg-[#631423] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F3D878]"
+                      className="flex min-h-[48px] w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#7A1C2E] px-6 py-3 text-sm font-semibold text-[#FAF6EE] shadow-lg transition-colors hover:bg-[#631423] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F3D878] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <LogIn className="h-4 w-4" />
-                      <span>Continue with Google</span>
+                      <span>{signingIn ? 'Opening Google Sign-In...' : 'Continue with Google'}</span>
                     </button>
                   </div>
                 ) : activeClaim ? (
@@ -444,9 +557,12 @@ export default function App() {
                           setTeacherName(e.target.value);
                           setVerifiedTeacher(null);
                         }}
-                        placeholder="e.g. Mrs. Esther Francis"
+                        placeholder="e.g. Miracle Okudor or Mrs. Esther Francis"
                         className="mt-1.5 min-h-[44px] w-full rounded-xl border border-[#D4AF37]/30 bg-[#081812] px-4 py-2.5 text-sm text-[#FAF6EE] placeholder:text-[#D8CEBE]/45 focus:border-[#F3D878] focus:outline-none"
                       />
+                      <p className="mt-1 text-[11px] text-[#D8CEBE]/75">
+                        Titles such as Mr, Mrs, or Miss are matched automatically.
+                      </p>
                     </div>
 
                     <div>
@@ -498,9 +614,22 @@ export default function App() {
                 )}
 
                 {!user && authError && (
-                  <div className="mt-3 flex items-start gap-2 rounded-xl border border-[#B42A43]/60 bg-[#4A0D19]/70 px-3.5 py-2.5 text-xs text-[#FAF6EE]">
-                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#F3D878]" />
-                    <span>{authError}</span>
+                  <div className="mt-3 space-y-2.5 rounded-xl border border-[#B42A43]/60 bg-[#4A0D19]/70 px-3.5 py-3 text-xs text-[#FAF6EE]">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#F3D878]" />
+                      <span>{authError}</span>
+                    </div>
+                    {showRedirectFallback && (
+                      <button
+                        type="button"
+                        disabled={signingIn}
+                        onClick={handleGoogleRedirectSignIn}
+                        className="flex min-h-[40px] w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-[#D4AF37]/45 bg-[#102A21] px-4 py-2 text-xs font-semibold text-[#F3D878] transition-colors hover:bg-[#16382D] disabled:opacity-60"
+                      >
+                        <LogIn className="h-3.5 w-3.5" />
+                        <span>Use Full-Page Google Sign-In</span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

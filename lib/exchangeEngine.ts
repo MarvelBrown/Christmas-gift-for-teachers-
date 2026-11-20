@@ -47,8 +47,103 @@ export const FESTIVE_MESSAGES: string[] = [
 
 const PIN_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
+const HONORIFIC_REGEX = /^(mr|mrs|miss|ms|dr|prof|rev)\.?\s+/i;
+
 export function normalizeTeacherName(name: string): string {
   return name.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+export function stripTeacherHonorific(name: string): string {
+  return name.trim().replace(/\s+/g, ' ').replace(HONORIFIC_REGEX, '').trim();
+}
+
+function editDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (Math.abs(a.length - b.length) > 2) return 3;
+  const dp: number[] = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = i - 1;
+    dp[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const temp = dp[j];
+      if (a[i - 1] === b[j - 1]) {
+        dp[j] = prev;
+      } else {
+        dp[j] = 1 + Math.min(prev, dp[j], dp[j - 1]);
+      }
+      prev = temp;
+    }
+  }
+  return dp[b.length];
+}
+
+function tokensLooselyMatch(inputToken: string, refToken: string): boolean {
+  if (inputToken === refToken) return true;
+  if (inputToken.length >= 3 && refToken.startsWith(inputToken)) return true;
+  if (refToken.length >= 3 && inputToken.startsWith(refToken)) return true;
+  return editDistance(inputToken, refToken) <= 2;
+}
+
+export function generateNameLookupCandidates(rawName: string): string[] {
+  const cleaned = rawName.trim().replace(/[,]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!cleaned) return [];
+
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (candidate: string) => {
+    const norm = normalizeTeacherName(candidate);
+    if (norm && !seen.has(norm)) {
+      seen.add(norm);
+      out.push(candidate.trim().replace(/\s+/g, ' '));
+    }
+  };
+
+  add(cleaned);
+
+  // Normalize honorific dot variations e.g. "Miss. Faith" <-> "Miss Faith"
+  const dotMatch = cleaned.match(/^(mr|mrs|miss|ms|dr|prof|rev)(\.?)\s+(.+)$/i);
+  if (dotMatch) {
+    const title = dotMatch[1];
+    const rest = dotMatch[3].trim();
+    add(`${title} ${rest}`);
+    add(`${title}. ${rest}`);
+  }
+
+  const core = stripTeacherHonorific(cleaned).replace(/\.+$/, '').trim();
+  if (core) {
+    add(core);
+    for (const prefix of ['Miss', 'Miss.', 'Mrs', 'Mrs.', 'Mr', 'Mr.', 'Ms', 'Ms.', 'Dr', 'Dr.']) {
+      add(`${prefix} ${core}`);
+    }
+
+    const words = core.split(' ').filter(Boolean);
+    if (words.length === 2) {
+      const swapped = `${words[1]} ${words[0]}`;
+      add(swapped);
+      for (const prefix of ['Miss', 'Miss.', 'Mrs', 'Mrs.', 'Mr', 'Mr.']) {
+        add(`${prefix} ${swapped}`);
+      }
+    }
+
+    // Match against known default roster names for minor spelling or missing-honorific variations
+    if (words.length >= 2) {
+      const inputTokens = words.map((w) => w.toLowerCase());
+      for (const teacher of DEFAULT_TEACHERS) {
+        const refTokens = stripTeacherHonorific(teacher.displayName)
+          .toLowerCase()
+          .split(' ')
+          .filter(Boolean);
+        const allMatch = inputTokens.every((inTok) =>
+          refTokens.some((refTok) => tokensLooselyMatch(inTok, refTok))
+        );
+        if (allMatch) {
+          add(teacher.displayName);
+        }
+      }
+    }
+  }
+
+  return out.slice(0, 30);
 }
 
 export function generateAccessPin(length = 6): string {
@@ -60,7 +155,8 @@ export function generateAccessPin(length = 6): string {
 }
 
 export function computeVaultId(displayName: string, pin: string, secretKeyHex: string): string {
-  const normalized = `${normalizeTeacherName(displayName)}:${pin.trim().toUpperCase()}`;
+  const normalizedPin = pin.replace(/\s+/g, '').toUpperCase();
+  const normalized = `${normalizeTeacherName(displayName)}:${normalizedPin}`;
   return crypto
     .createHmac('sha256', Buffer.from(secretKeyHex, 'hex'))
     .update(normalized)
